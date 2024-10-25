@@ -1,0 +1,1 @@
+java -jar cg-brutaltester-1.0.0-SNAPSHOT.jar -r "java -jar cg-referee-ghost-in-the-cell.jar" -p1 "target/release/GhostInTheCell_rust" -p2 "python baseline.py" -t 2 -n 10 -l "./logs/" -o
