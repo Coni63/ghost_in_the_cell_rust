@@ -32,19 +32,113 @@ const NUM_FACTORIES: usize = 15;
 const FACTORY_UPGRADE_COST: i32 = 10;
 const BOMB_PRODUCTION_COOLDOWN: i32 = 5;
 const MAX_LINK_DISTANCE: i32 = 7;
-const INITIAL_FACTORY: i32 = -1;
-const INITIAL_FACTORY_ENEMY: i32 = -1;
 const FRONTLINE_FACTORY: i32 = -1;
 const FRONTLINE_DISTANCE: i32 = MAX_INT;
 const CYBORGS_OWN: i32 = 0;
 const CYBORGS_ENEMY: i32 = 0;
+const ENEMY_CODE: i32 = -1;
+const MY_CODE: i32 = 1;
 
 type I32Matrix = [[i32; NUM_FACTORIES]; NUM_FACTORIES];
 type UsizeMatrix = [[usize; NUM_FACTORIES]; NUM_FACTORIES];
 type VecMatrix = [[Vec<usize>; NUM_FACTORIES]; NUM_FACTORIES];
 
+struct Base {
+    entity_id: usize,
+    owner: i32,
+    cyborgs: i32,
+    production: i32,
+    cooldown: i32,
+    incomming: Vec<usize>, // List of incoming troops
+    actions: Vec<Action>,  // Actions to be taken this turn
+    blacklist: Vec<usize>, // Blacklist of factories that are not to be attacked
+    troops_defensive: i32, // Local threshold Troops defending this base
+    troops_offensive: i32, // Local threshold Troops attacking this base
+}
+
+impl Base {
+    pub fn new(entity_id: usize) -> Self {
+        Base {
+            entity_id,
+            owner: 0,
+            cyborgs: 0,
+            production: 0,
+            cooldown: 0,
+            incomming: Vec::new(),
+            actions: Vec::new(),
+            blacklist: Vec::new(),
+            troops_defensive: 0,
+            troops_offensive: 0,
+        }
+    }
+
+    pub fn update(&mut self, owner: i32, cyborgs: i32, production: i32, cooldown: i32) {
+        self.owner = owner;
+        self.cyborgs = cyborgs;
+        self.production = production;
+        self.cooldown = cooldown;
+    }
+
+    pub fn tick(&mut self) {
+        self.incomming.clear();
+        self.actions.clear();
+        self.blacklist.clear();
+    }
+
+    pub fn push_incomming_troop(&mut self, entity_id: usize) {
+        self.incomming.push(entity_id);
+    }
+
+    pub fn closest_enemy(
+        &self,
+        dist_matrix: &I32Matrix,
+        factories: &[Base],
+    ) -> (Option<usize>, i32) {
+        let mut nearest_factory: Option<usize> = None;
+        let mut nearest_distance = MAX_INT;
+        for (i, &distance) in dist_matrix[self.entity_id].iter().enumerate() {
+            if distance < nearest_distance
+                && i != self.entity_id
+                && factories[i].owner != self.owner
+            {
+                nearest_distance = distance;
+                nearest_factory = Some(i);
+            }
+        }
+        (nearest_factory, nearest_distance)
+    }
+}
+
+struct Bomb {
+    entity_id: usize,
+    owner: i32,
+    source: i32,
+    target: i32,
+    cooldown: i32,
+}
+
+impl Bomb {}
+
+struct Troop {
+    entity_id: usize,
+    owner: i32,
+    source: i32,
+    target: i32,
+    cyborgs: i32,
+    cooldown: i32,
+}
+
+impl Troop {}
+
+enum Action {
+    BOMB(i32, i32),
+    TROOP(i32, i32, i32),
+    WAIT,
+    INC(i32),
+}
+
 /// Load all edges from the game input and return a pairwise matrix (symmetrical)
-pub fn init_edge_matrix() -> I32Matrix {
+fn init_edge_matrix() -> I32Matrix {
     let mut bases_distances = [[0; NUM_FACTORIES]; NUM_FACTORIES];
 
     let mut input_line = String::new();
@@ -66,7 +160,7 @@ pub fn init_edge_matrix() -> I32Matrix {
 }
 
 /// Runs Floyd-Warshall with path and next matrix generation
-pub fn floyd_warshall(bases_distances: &I32Matrix) -> (I32Matrix, UsizeMatrix, VecMatrix) {
+fn floyd_warshall(bases_distances: &I32Matrix) -> (I32Matrix, UsizeMatrix, VecMatrix) {
     let mut dist = [[MAX_INT; NUM_FACTORIES]; NUM_FACTORIES];
     let mut next = [[MAX_INT as usize; NUM_FACTORIES]; NUM_FACTORIES];
     let mut path = array::from_fn(|_| array::from_fn(|_| Vec::<usize>::new()));
@@ -108,6 +202,24 @@ pub fn floyd_warshall(bases_distances: &I32Matrix) -> (I32Matrix, UsizeMatrix, V
     (dist, next, path)
 }
 
+fn find_frontline_factory(bases_distances: &I32Matrix, factories: &[Base]) -> Option<usize> {
+    let mut frontline_factory: Option<usize> = None;
+
+    // Find the closest enemy factory to any of our factories
+    let mut frontline_distance = MAX_INT;
+    for factory in factories.iter() {
+        if factory.owner == ENEMY_CODE {
+            let (_, nearest_distance) = factory.closest_enemy(bases_distances, factories);
+            if nearest_distance < frontline_distance {
+                frontline_distance = nearest_distance;
+                frontline_factory = Some(factory.entity_id);
+            }
+        }
+    }
+
+    frontline_factory
+}
+
 fn main() {
     let mut input_line = String::new();
     io::stdin().read_line(&mut input_line).unwrap();
@@ -128,65 +240,104 @@ fn main() {
     // game loop
     let mut turn = 0;
 
-    // let mut factory_info: [Base; 15] = (0..15).map(|i| Base::new(i));
-    // let mut factory_simul: [Base; 15] = (0..15).map(|i| Base::new(i));
+    let mut factory_info: Vec<Base> = (0..factory_count).map(|i| Base::new(i)).collect();
+    let mut factory_simul: Vec<Base> = (0..factory_count).map(|i| Base::new(i)).collect();
 
-    // loop {
-    //     let mut troops: Vec<Troop> = vec![];
-    //     let mut bombs: Vec<Bomb> = vec![];
-    //     let mut factories: Vec<Base> = vec![];
+    loop {
+        let mut count_simulations = 0;
 
-    //     let mut input_line = String::new();
-    //     io::stdin().read_line(&mut input_line).unwrap();
-    //     let entity_count = parse_input!(input_line, i32); // the number of entities (e.g. factories and troops)
-    //     for _ in 0..entity_count as usize {
-    //         let mut input_line = String::new();
-    //         io::stdin().read_line(&mut input_line).unwrap();
-    //         let inputs = input_line.split(" ").collect::<Vec<_>>();
-    //         let entity_id = parse_input!(inputs[0], i32);
-    //         let entity_type = inputs[1].trim().to_string();
-    //         match entity_type.as_str() {
-    //             "FACTORY" => factories.push(Base {
-    //                 entity_id,
-    //                 owner: parse_input!(inputs[2], i32),
-    //                 cyborgs: parse_input!(inputs[3], i32),
-    //                 production: parse_input!(inputs[4], i32),
-    //                 timeout: parse_input!(inputs[5], i32),
-    //             }),
-    //             "TROOP" => troops.push(Troop {
-    //                 entity_id,
-    //                 owner: parse_input!(inputs[2], i32),
-    //                 source: parse_input!(inputs[3], i32),
-    //                 target: parse_input!(inputs[4], i32),
-    //                 cyborgs: parse_input!(inputs[5], i32),
-    //                 timeout: parse_input!(inputs[6], i32),
-    //             }),
-    //             "BOMB" => bombs.push(Bomb {
-    //                 entity_id,
-    //                 owner: parse_input!(inputs[2], i32),
-    //                 source: parse_input!(inputs[3], i32),
-    //                 target: parse_input!(inputs[4], i32),
-    //                 timeout: parse_input!(inputs[5], i32),
-    //             }),
-    //             _ => panic!("Uncovered entity type"),
-    //         }
-    //     }
+        let mut troops: Vec<Troop> = vec![];
+        let mut bombs: Vec<Bomb> = vec![];
+        let mut factories: Vec<Base> = vec![];
+        let mut factory_simul: Vec<Base> = vec![]; // why ?
+        let mut actions: Vec<Action> = vec![];
 
-    //     let actions = solve(
-    //         turn,
-    //         &bases_distances,
-    //         &distances,
-    //         &next,
-    //         &centrality,
-    //         &factories,
-    //         &troops,
-    //     );
+        let mut cyborgs_own = 0;
+        let mut cyborgs_enemy = 0;
 
-    //     // Write an action using println!("message...");
-    //     // To debug: eprintln!("Debug message...");
+        let mut my_factories: Vec<usize> = vec![];
 
-    //     // Any valid action, such as "WAIT" or "MOVE source destination cyborgs"
-    //     println!("{}", stringify_actions(&actions));
-    //     turn += 1;
-    // }
+        for i in 0..factory_count {
+            factories[i].tick();
+            factory_simul[i].tick();
+        }
+
+        // Reads game turn state
+        let mut input_line = String::new();
+        io::stdin().read_line(&mut input_line).unwrap();
+        let entity_count = parse_input!(input_line, i32); // the number of entities (e.g. factories and troops)
+        for _ in 0..entity_count as usize {
+            let mut input_line = String::new();
+            io::stdin().read_line(&mut input_line).unwrap();
+            let inputs = input_line.split(" ").collect::<Vec<_>>();
+            let entity_id = parse_input!(inputs[0], usize);
+            let entity_type = inputs[1].trim().to_string();
+            match entity_type.as_str() {
+                "FACTORY" => {
+                    let owner = parse_input!(inputs[2], i32);
+                    let cyborgs = parse_input!(inputs[3], i32);
+                    let production = parse_input!(inputs[4], i32);
+                    let cooldown = parse_input!(inputs[5], i32);
+                    factories[entity_id].update(owner, cyborgs, production, cooldown);
+                    factory_simul[entity_id].update(owner, cyborgs, production, cooldown);
+
+                    if owner == MY_CODE {
+                        my_factories.push(entity_id);
+                        cyborgs_own += cyborgs;
+                    } else {
+                        cyborgs_enemy += cyborgs;
+                    }
+                }
+                "TROOP" => {
+                    let owner = parse_input!(inputs[2], i32);
+                    let source = parse_input!(inputs[3], i32);
+                    let target = parse_input!(inputs[4], i32);
+                    let cyborgs = parse_input!(inputs[5], i32);
+                    let cooldown = parse_input!(inputs[6], i32);
+                    troops.push(Troop {
+                        entity_id,
+                        owner,
+                        source,
+                        target,
+                        cyborgs,
+                        cooldown,
+                    });
+                    factories[entity_id].push_incomming_troop(entity_id);
+                    if owner == MY_CODE {
+                        cyborgs_own += cyborgs;
+                    } else {
+                        cyborgs_enemy += cyborgs;
+                    }
+                }
+                "BOMB" => bombs.push(Bomb {
+                    entity_id,
+                    owner: parse_input!(inputs[2], i32),
+                    source: parse_input!(inputs[3], i32),
+                    target: parse_input!(inputs[4], i32),
+                    cooldown: parse_input!(inputs[5], i32),
+                }),
+                _ => panic!("Uncovered entity type"),
+            }
+        }
+
+        let frontline_factory = find_frontline_factory(&bases_distances, &factories);
+        eprintln!("Determined FRONTLINE factory: {frontline_factory:?}");
+
+        //     let actions = solve(
+        //         turn,
+        //         &bases_distances,
+        //         &distances,
+        //         &next,
+        //         &centrality,
+        //         &factories,
+        //         &troops,
+        //     );
+
+        //     // Write an action using println!("message...");
+        //     // To debug: eprintln!("Debug message...");
+
+        //     // Any valid action, such as "WAIT" or "MOVE source destination cyborgs"
+        //     println!("{}", stringify_actions(&actions));
+        //     turn += 1;
+    }
 }
