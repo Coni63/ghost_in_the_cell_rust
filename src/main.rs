@@ -96,7 +96,8 @@ impl Base {
     ) -> (Option<usize>, i32) {
         let mut nearest_factory: Option<usize> = None;
         let mut nearest_distance = MAX_INT;
-        for (i, &distance) in dist_matrix[self.entity_id].iter().enumerate() {
+        for (i, factory) in factories.iter().enumerate() {
+            let distance = dist_matrix[self.entity_id][factory.entity_id];
             if distance < nearest_distance
                 && i != self.entity_id
                 && factories[i].owner != self.owner
@@ -112,8 +113,8 @@ impl Base {
 struct Bomb {
     entity_id: usize,
     owner: i32,
-    source: i32,
-    target: i32,
+    source: usize,
+    target: usize,
     cooldown: i32,
 }
 
@@ -122,8 +123,8 @@ impl Bomb {}
 struct Troop {
     entity_id: usize,
     owner: i32,
-    source: i32,
-    target: i32,
+    source: usize,
+    target: usize,
     cyborgs: i32,
     cooldown: i32,
 }
@@ -248,8 +249,6 @@ fn main() {
 
         let mut troops: Vec<Troop> = vec![];
         let mut bombs: Vec<Bomb> = vec![];
-        let mut factories: Vec<Base> = vec![];
-        let mut factory_simul: Vec<Base> = vec![]; // why ?
         let mut actions: Vec<Action> = vec![];
 
         let mut cyborgs_own = 0;
@@ -258,7 +257,7 @@ fn main() {
         let mut my_factories: Vec<usize> = vec![];
 
         for i in 0..factory_count {
-            factories[i].tick();
+            factory_info[i].tick();
             factory_simul[i].tick();
         }
 
@@ -278,7 +277,7 @@ fn main() {
                     let cyborgs = parse_input!(inputs[3], i32);
                     let production = parse_input!(inputs[4], i32);
                     let cooldown = parse_input!(inputs[5], i32);
-                    factories[entity_id].update(owner, cyborgs, production, cooldown);
+                    factory_info[entity_id].update(owner, cyborgs, production, cooldown);
                     factory_simul[entity_id].update(owner, cyborgs, production, cooldown);
 
                     if owner == MY_CODE {
@@ -290,8 +289,8 @@ fn main() {
                 }
                 "TROOP" => {
                     let owner = parse_input!(inputs[2], i32);
-                    let source = parse_input!(inputs[3], i32);
-                    let target = parse_input!(inputs[4], i32);
+                    let source = parse_input!(inputs[3], usize);
+                    let target = parse_input!(inputs[4], usize);
                     let cyborgs = parse_input!(inputs[5], i32);
                     let cooldown = parse_input!(inputs[6], i32);
                     troops.push(Troop {
@@ -302,7 +301,7 @@ fn main() {
                         cyborgs,
                         cooldown,
                     });
-                    factories[entity_id].push_incomming_troop(entity_id);
+                    factory_info[target].push_incomming_troop(entity_id);
                     if owner == MY_CODE {
                         cyborgs_own += cyborgs;
                     } else {
@@ -312,15 +311,15 @@ fn main() {
                 "BOMB" => bombs.push(Bomb {
                     entity_id,
                     owner: parse_input!(inputs[2], i32),
-                    source: parse_input!(inputs[3], i32),
-                    target: parse_input!(inputs[4], i32),
+                    source: parse_input!(inputs[3], usize),
+                    target: parse_input!(inputs[4], usize),
                     cooldown: parse_input!(inputs[5], i32),
                 }),
                 _ => panic!("Uncovered entity type"),
             }
         }
 
-        let frontline_factory = find_frontline_factory(&bases_distances, &factories);
+        let frontline_factory = find_frontline_factory(&bases_distances, &factory_info);
         eprintln!("Determined FRONTLINE factory: {frontline_factory:?}");
 
         //     let actions = solve(
@@ -339,5 +338,7 @@ fn main() {
         //     // Any valid action, such as "WAIT" or "MOVE source destination cyborgs"
         //     println!("{}", stringify_actions(&actions));
         //     turn += 1;
+
+        println!("WAIT"); // Placeholder action, replace with actual logic
     }
 }
